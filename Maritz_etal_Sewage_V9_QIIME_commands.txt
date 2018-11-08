@@ -344,7 +344,6 @@ summarize_taxa.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_nouna
 	-o . -L 13 --suppress_biom_table_output
 
 # The taxonomy file was formatted, run through the web version of LEfSe and visualized with GraPhlAn
-	# See the file XXX for these commands
 
 
 #### Fall Sewage only analysis
@@ -430,7 +429,6 @@ filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filte
 # See the 'Maritz_etal_Sewage_network_analysis_commands.txt file for network analysis commands
 
 
-#### SourceTracker2 analysis
 
 
 
