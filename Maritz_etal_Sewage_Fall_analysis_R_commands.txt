@@ -1,0 +1,381 @@
+
+####  NYC Cross Sectional 18S rRNA gene R Diversity Analysis - V4 and V9 regions run simultaniously
+
+
+### R data analysis workflow used in manuscript:
+##
+##
+##
+
+
+
+############### Load in the Data ###############
+
+library("phyloseq")
+library("vegan")
+
+library("ggplot2")
+library("Hmisc")
+library("gridExtra")
+library("extrafont")
+
+setwd("~/Desktop/Sewage_paper/Fall_analysis")
+
+
+#### V4
+otufile = "V4_otu_table_w_tax_Protist_af001_FALL_filtered_sorted.biom"
+mapfile = "Fall_mapp.txt"
+
+qiimedataV4 = import_biom(BIOMfilename=otufile)
+mapdata = import_qiime(mapfilename=mapfile)
+
+Fall2014_V4 = merge_phyloseq(qiimedataV4, mapdata)
+
+### V4 DEP Only
+Fall_DEP_V4 = prune_samples(sample_data(Fall2014_V4)$Site_type=="DEP", Fall2014_V4)
+
+
+#### V9
+otufile = "V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted.biom"
+
+qiimedataV9 = import_biom(BIOMfilename=otufile)
+
+Fall2014_V9 = merge_phyloseq(qiimedataV9, mapdata)
+
+### V9 DEP Only
+Fall_DEP_V9 = prune_samples(sample_data(Fall2014_V9)$Site_type=="DEP", Fall2014_V9)
+
+
+#### Get variables organized
+Variables=data.frame(sample_data(Fall2014_V4))
+
+SampleID = Variables$SampleID
+Borough = Variables$Borough
+Environment = Variables$Environment
+Site_type = Variables$Site_type
+V9_MiseqRun = Variables$V9_Miseq_run
+V4_MiseqRun = Variables$V4_miseq_run
+Biomass = Variables$Biomass
+
+
+
+############### Alpha Diversity Analysis ###############
+
+#### Import the Shannon diversity calculated in QIIME
+### V4
+V4_Shannon = read.table("V4_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_rarefaction50000_alpha.txt")
+
+### V9
+V9_Shannon = read.table("V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_rarefaction90000_alpha.txt")
+
+#### Make dataframe of all data for both regions
+Borough.alpha = c(as.character(sample_data(Fall_DEP_V4)$Borough[1:34]), rep(c("NA"), times=32))
+Fall.alpha = data.frame(Environment, Borough.alpha, Biomass, V9_Shannon, V4_Shannon, row.names = SampleID)
+colnames(Fall.alpha) = c("Environment", "Borough", "Biomass", "V9_Shannon", "V4_Shannon")
+Fall.alpha$Borough = factor(Fall.alpha$Borough, levels=c("Bk", "BQ", "Bx","BM", "M", "Qu", "SI"))
+Fall.alpha$Environment = factor(Fall.alpha$Environment, levels=c("DEP_sewage", "Private_sewage", "Stormwater", "Sediment", "Soil"))
+
+### Get mean and standard deviation of Biomass and Shannon Diveristy
+means.alpha = apply(Fall.alpha[,3:5], 2, function(x) tapply(x, Fall.alpha$Environment, mean))
+sd.alpha = apply(Fall.alpha[,3:5], 2, function(x) tapply(x, Fall.alpha$Environment, sd))
+
+#### Test for significant differences
+### Kruskal Wallis test for Biomass and alpha diversity of different environments
+kruskal.test(Fall.alpha$Environment ~ Fall.alpha$Biomass, data=Fall.alpha)
+kruskal.test(Fall.alpha$Environment ~ Fall.alpha$V4_Shannon, data=Fall.alpha)
+kruskal.test(Fall.alpha$Environment ~ Fall.alpha$V9_Shannon, data=Fall.alpha)
+
+### Pairwise Wilcox tests with multiple testing correction to find differences between environments
+levs.env = levels(Fall.alpha$Environment)
+
+## V4
+# Define the test matrix
+dist.met.fall.V4 = Fall.alpha$V4_Shannon
+# Set up the pairwise tests
+phoc.test.fall.V4 = function(x){
+  spair = (Fall.alpha$Environment %in% x)
+  phoc = wilcox.test(dist.met.fall.V4[spair] ~ Environment[spair], 
+                     data=Fall.alpha)
+  c(x, phoc$p.value)
+}
+
+# Run the tests
+p.vals.fall.V4 = combn(levs.env,2, phoc.test.fall.V4)
+# Multiple testing correction
+p.vals.fall.V4.corrected = rbind(p.vals.fall.V4,
+                                 p.adjust(p.vals.fall.V4[3,], 
+                                          method="bonf"),
+                                 p.adjust(p.vals.fall.V4[3,],
+                                          method="fdr"))
+
+## V9
+dist.met.fall.V9 = Fall.alpha$V9_Shannon
+phoc.test.fall.V9 = function(x){
+  spair = (Fall.alpha$Environment %in% x)
+  phoc = wilcox.test(dist.met.fall.V9[spair] ~ Environment[spair], 
+                     data=Fall.alpha)
+  c(x, phoc$p.value)
+}
+p.vals.fall.V9 = combn(levs.env,2, phoc.test.fall.V9 )
+p.vals.fall.V9.corrected = rbind(p.vals.fall.V9,
+                                 p.adjust(p.vals.fall.V9[3,], 
+                                          method="bonf"),
+                                 p.adjust(p.vals.fall.V9[3,],
+                                          method="fdr"))
+
+### Correlation of Biomass and alpha diversity
+## V4
+with(Fall.alpha, 
+     cor(Biomass, V4_Shannon, method="spearman"))
+
+## V9
+with(Fall.alpha, 
+     cor(Biomass, V9_Shannon, method="spearman"))
+
+#### Make the alpha diversity scatter plots
+
+### Plot Shapes:
+## DEP - filled triangle: 25
+## Private building - open triangle: 6
+## Sediment - filled diamond: 23
+## Soil - +: 3
+
+### Biomass
+Fall.biomass = ggplot(Fall.alpha, aes(x=Environment, y=Biomass)) + geom_jitter(size=2, aes(color=Borough, fill=Borough, shape=Environment), width = 0.42)
+Fall.biomass = Fall.biomass + scale_y_continuous(name="DNA extracted (ng/uL)") + scale_x_discrete("Environment", breaks=c("DEP_sewage", "Private_sewage", "Stormwater", "Sediment", "Soil"))
+Fall.biomass = Fall.biomass + scale_color_brewer(palette = "Set1", na.value="grey40", direction=-1, breaks=c("Bk", "BQ", "Qu", "SI", "Bx", "BM", "M")) 
+Fall.biomass = Fall.biomass + scale_fill_brewer(palette = "Set1", na.value="grey40", direction=-1, breaks=c("Bk", "BQ", "Qu", "SI", "Bx", "BM", "M"))
+Fall.biomass = Fall.biomass + scale_shape_manual(values=c(25,6,6,23,15), guide="none")
+Fall.biomass = Fall.biomass + stat_summary(fun.data = "mean_sdl", fun.args = list(mult = 1), colour = "black", geom = "errorbar", width = 0.25, size=0.75) + stat_summary(fun.y = "mean", colour = "black", geom = "point", size = 2, shape=15)
+Fall.biomass = Fall.biomass + theme(axis.title.x=element_blank(), axis.text.x=element_text(size=10, family="Arial", color="black", hjust=1, angle=60), axis.ticks.x=element_line(color="black", size=1), axis.line.x=element_line(size=1, color="black", linetype="solid"), panel.grid.major.x=element_blank())
+Fall.biomass = Fall.biomass + theme(axis.title.y=element_text(size=10, family="Arial", color="black"), axis.text.y=element_text(size=10, family="Arial", color="black"), axis.ticks.y=element_line(color="black", size=1), axis.line.y=element_line(size=1, color="black", linetype="solid"), panel.grid.major.y=element_line(color="grey90", linetype="dashed")) 
+Fall.biomass = Fall.biomass + theme(panel.background=element_rect(fill="white"), panel.grid.minor=element_blank(), axis.ticks.length=unit(0.2, "cm"))
+Fall.biomass = Fall.biomass + theme(legend.title=element_text(size=10, family="Arial", face = "bold"), legend.text=element_text(size=10, family="Arial"))
+Fall.biomass = Fall.biomass + theme(legend.position="bottom", legend.justification="center", legend.key.height=unit(0.5, "cm"), legend.key.width=unit(0.7, "cm"), legend.key=element_rect(fill="white"), panel.grid.minor=element_blank()) + guides(color=guide_legend(override.aes = list(size=3),nrow=1))
+
+## Get the legend to make a common one
+get_legend<-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+Fall.borough.legend = get_legend(Fall.biomass)
+
+# Plot the legend by itself
+pdf(file="Fall_Borough_legend.pdf", width=4.2, height=0.17, bg="white", useDingbats = FALSE)
+plot(Fall.borough.legend)
+dev.off()
+
+## Remove legend from plot
+Fall.biomass = Fall.biomass + theme(plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"), legend.position = "none") 
+
+### V4 Shannon Diversity
+AlphaV4 = ggplot(Fall.alpha, aes(x=Environment, y=V4_Shannon)) + geom_jitter(size=2, aes(color=Borough, fill=Borough, shape=Environment), width = 0.42)
+AlphaV4 = AlphaV4 + scale_color_brewer(palette = "Set1", na.value="grey40", direction=-1) + scale_fill_brewer(palette = "Set1", na.value="grey40", direction=-1)
+AlphaV4 = AlphaV4 + scale_shape_manual(values=c(25,6,6,23,15), guide="none") + scale_y_continuous(name="Shannon Diversity Index", breaks=seq(2,8,2))
+AlphaV4 = AlphaV4 + stat_summary(fun.data = "mean_sdl", fun.args = list(mult = 1), colour = "black", geom = "errorbar", width = 0.25, size=0.75) + stat_summary(fun.y = "mean", colour = "black", geom = "point", size = 2, shape=15)
+AlphaV4 = AlphaV4 + theme(axis.title.x=element_blank(), axis.text.x=element_text(size=10, family="Arial", color="black", hjust=1, angle=60), axis.ticks.x=element_line(color="black", size=1), axis.line.x=element_line(size=1, color="black", linetype="solid"), panel.grid.major.x=element_blank())
+AlphaV4 = AlphaV4 + theme(axis.title.y=element_text(size=10, family="Arial", color="black"), axis.text.y=element_text(size=10, family="Arial", color="black"), axis.ticks.y=element_line(color="black", size=1), axis.line.y=element_line(size=1, color="black", linetype="solid"), panel.grid.major.y=element_line(color="grey90", linetype="dashed")) 
+AlphaV4 = AlphaV4 + theme(axis.ticks.length=unit(0.2, "cm"), legend.position="none", panel.background=element_rect(fill="white"), panel.grid.minor=element_blank()) 
+AlphaV4 = AlphaV4 + theme(plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+### V9 Shannon diversity
+AlphaV9 = ggplot(Fall.alpha, aes(x=Environment, y=V9_Shannon)) + geom_jitter(size=2, aes(color=Borough, fill=Borough, shape=Environment), width = 0.42)
+AlphaV9 = AlphaV9 + scale_color_brewer(palette = "Set1", na.value="grey40", direction=-1) + scale_fill_brewer(palette = "Set1", na.value="grey40", direction=-1)
+AlphaV9 = AlphaV9 + scale_shape_manual(values=c(25,6,6,23,15)) + scale_y_continuous(name="Shannon Diversity Index", breaks=seq(2,8,2))
+AlphaV9 = AlphaV9 + stat_summary(fun.data = "mean_sdl", fun.args = list(mult = 1), colour = "black", geom = "errorbar", width = 0.25, size=0.75) + stat_summary(fun.y = "mean", colour = "black", geom = "point", size = 2, shape=15)
+AlphaV9 = AlphaV9 + theme(axis.title.x=element_blank(), axis.text.x=element_text(size=10, family="Arial", color="black", hjust=1, angle=60), axis.ticks.x=element_line(color="black", size=1), axis.line.x=element_line(size=1, color="black", linetype="solid"), panel.grid.major.x=element_blank())
+AlphaV9 = AlphaV9 + theme(axis.title.y=element_text(size=10, family="Arial", color="black"), axis.text.y=element_text(size=10, family="Arial", color="black"), axis.ticks.y=element_line(color="black", size=1), axis.line.y=element_line(size=1, color="black", linetype="solid"), panel.grid.major.y=element_line(color="grey90", linetype="dashed")) 
+AlphaV9 = AlphaV9 + theme(axis.ticks.length=unit(0.2, "cm"), legend.position = "none", panel.background=element_rect(fill="white"), panel.grid.minor=element_blank())
+AlphaV9 = AlphaV9 + theme(plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+### Make one figure
+FigS1 = grid.arrange(Fall.biomass, AlphaV4, AlphaV9, ncol=3, nrow=1)
+pdf(file="FigS1.pdf", width=7, height=4, bg="white", useDingbats = FALSE)
+plot(FigS1)
+dev.off()
+
+
+
+############### Beta Diversity Analysis ###############
+
+#### V4 All Fall Samples
+### NMDS
+Fall.V4.nmds.bray = metaMDS(t(otu_table(Fall2014_V4)), distance = "bray", k=2, trymax = 50)
+stressplot(Fall.V4.nmds.bray)
+
+## Make dataframe of scores and metadata
+Fall.V4.nmds.bray.df = data.frame(scores(Fall.V4.nmds.bray, dispaly=c("sites")), Borough, Site_type, Environment, V4_MiseqRun)
+Fall.V4.nmds.bray.df$Environment = factor(Fall.V4.nmds.bray.df$Environment, levels=c("DEP_sewage", "Private_sewage", "Stormwater", "Sediment", "Soil"))
+
+### Test for significant differences
+## re-create the distance matrix used
+Fall.V4.nmds.bray.dist = metaMDSredist(Fall.V4.nmds.bray)
+## adonis test
+V4.test = adonis(Fall.V4.nmds.bray.dist ~ Environment + Site_type + Borough, data = Fall.V4.nmds.bray.df, permutations = 10000, by = "terms")
+## Multiple testing correction
+p.adjust(V4.test$aov.tab[,6])
+
+#### V9 All Fall Samples
+### NMDS
+Fall.V9.nmds.bray = metaMDS(t(otu_table(Fall2014_V9)), distance = "bray", k=2, trymax = 50)
+stressplot(Fall.V9.nmds.bray)
+
+## Make dataframe of scores and metadata
+Fall.V9.nmds.bray.df = data.frame(scores(Fall.V9.nmds.bray, dispaly=c("sites")), Borough, Site_type, Environment, V9_MiseqRun)
+Fall.V9.nmds.bray.df$Environment = factor(Fall.V9.nmds.bray.df$Environment, levels=c("DEP_sewage", "Private_sewage", "Stormwater", "Sediment", "Soil"))
+
+### Test for significant differences
+## re-create the distance matrix used
+Fall.V9.nmds.bray.dist = metaMDSredist(Fall.V9.nmds.bray)
+## adonis test
+V9.test = adonis(Fall.V9.nmds.bray.dist ~ Environment + Site_type + Borough, data = Fall.V9.nmds.bray.df, permutations = 10000, by = "terms")
+## Multiple testing correction
+p.adjust(V9.test$aov.tab[,6])
+
+#### Make the NMDS beta diversity plots
+### By Miseq run
+Run.Fall.NMDS.V4 = ggplot(Fall.V4.nmds.bray.df, aes(x=NMDS1, y=NMDS2, color = V4_MiseqRun)) + geom_point(size=2)
+Run.Fall.NMDS.V9 = ggplot(Fall.V9.nmds.bray.df, aes(x=NMDS1, y=NMDS2, color = V9_MiseqRun)) + geom_point(size=2)
+
+### By Environment and Site Type
+
+## Plot Environment colors (RGB/CMYK):
+# DEP - Orange: #ff8000, #f57f20
+# Private - Yellow: #f9e500, #f8e400
+# Water - Blue: #0080ff, #125fb2
+# Sediment - Purple: #6a00e5, #563689
+# Soil - Green: #00f700, #60b342
+
+## Plot Site Type shapes:
+# DEP - filled triangle: 25
+# Privte Building - open triangle: 6
+# Canal - diamond x: 9
+# Salt marsh - star: 11
+# Community Garden - filled square: 15
+# Mudflat - filled diamond: 23
+# Parking lot - + square: 12
+# Park - +: 3
+
+## V4 - only make legend for site type
+Fall.NMDS.V4 = ggplot(Fall.V4.nmds.bray.df, aes(x=NMDS1, y=NMDS2, color = Environment, shape=Site_type, fill=Environment)) + geom_point(size=2)
+Fall.NMDS.V4 = Fall.NMDS.V4 + scale_color_manual(values=c("#f57f20","#f8e400","#125fb2","#563689","#60b342"), guide="none")
+Fall.NMDS.V4 = Fall.NMDS.V4 + scale_fill_manual(values=c("#f57f20","#f8e400","#125fb2","#563689","#60b342"), guide="none")
+Fall.NMDS.V4 = Fall.NMDS.V4 + scale_shape_manual(name=("Site Type"), breaks=c("DEP", "Canal", "Salt_marsh", "Community_garden", "Private_building", "Mudflat", "Parking_lot", "Park"), values=c(9,15,25,23,3,12,6,11), labels=c("DEP", "Canal", "Salt marsh", "Community garden", "Private building", "Mudflat", "Parking lot", "Park"))
+Fall.NMDS.V4 = Fall.NMDS.V4 + theme(axis.title.x=element_text(size=10, family="Arial"), axis.text.x=element_text(size=10, family="Arial"), axis.title.y=element_text(size=10, family="Arial"), axis.text.y=element_text(size=10, family="Arial"))
+Fall.NMDS.V4 = Fall.NMDS.V4 + theme(legend.title=element_text(size=10, family="Arial", face = "bold"), legend.text=element_text(size=10, family="Arial"))
+Fall.NMDS.V4 = Fall.NMDS.V4 + theme(legend.position="bottom", legend.justification="center", legend.key.height=unit(0.5, "cm"), legend.key.width=unit(0.7, "cm"), legend.key=element_rect(fill="white"), panel.grid.minor=element_blank()) + guides(shape=guide_legend(override.aes = list(size=3),nrow=4))
+
+# Get the legend for Site Type to make a common one
+Fall.type.legend = get_legend(Fall.NMDS.V4)
+# Plot the legend by itself
+pdf(file="Fall_site.pdf", width=3.5, height=0.75, bg="white", useDingbats = FALSE)
+plot(Fall.type.legend)
+dev.off()
+# Remove legend from plot
+Fall.NMDS.V4 = Fall.NMDS.V4 + theme(legend.position="none", plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+## V9 - only make legend for environment
+Fall.NMDS.V9 = ggplot(Fall.V9.nmds.bray.df, aes(x=NMDS1, y=NMDS2, color = Environment, fill=Environment, shape=Site_type)) + geom_point(size=2)
+Fall.NMDS.V9 = Fall.NMDS.V9 + scale_color_manual(values=c("#f57f20","#f8e400","#125fb2","#563689","#60b342"), labels=c("DEP sewage", "Private sewage", "Stormwater", "Sediment", "Soil"))
+Fall.NMDS.V9 = Fall.NMDS.V9 + scale_fill_manual(values=c("#f57f20","#f8e400","#125fb2","#563689","#60b342"), guide="none")
+Fall.NMDS.V9 = Fall.NMDS.V9 + scale_shape_manual(breaks=c("DEP", "Private_building", "Canal", "Salt_marsh", "Mudflat", "Park", "Community_garden", "Parking_lot"), values=c(9,15,25,23,3,12,6,11), guide="none")
+Fall.NMDS.V9 = Fall.NMDS.V9 + theme(axis.title.x=element_text(size=10, family="Arial"), axis.text.x=element_text(size=10, family="Arial"), axis.title.y=element_text(size=10, family="Arial"), axis.text.y=element_text(size=10, family="Arial"))
+Fall.NMDS.V9 = Fall.NMDS.V9 + theme(legend.title=element_text(size=10, family="Arial", face = "bold"), legend.text=element_text(size=10, family="Arial"))
+Fall.NMDS.V9 = Fall.NMDS.V9 + theme(legend.position="bottom", legend.justification="center", legend.key.height=unit(0.5, "cm"), legend.key.width=unit(1.0, "cm"), legend.key=element_rect(fill="white"), panel.grid.minor=element_blank()) + guides(color=guide_legend(override.aes = list(size=3),nrow=1))
+
+# Get the legend to make a common one
+Fall.Env.legend = get_legend(Fall.NMDS.V9)
+# Plot the legend by itself
+pdf(file="Fall_environment.pdf", width=7, height=0.17, bg="white", useDingbats = FALSE)
+plot(Fall.Env.legend)
+dev.off()
+# Remove legend from plot
+Fall.NMDS.V9 = Fall.NMDS.V9 + theme(legend.position="none", plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+## Make one figure
+Fig2.beta = grid.arrange(Fall.NMDS.V4, Fall.NMDS.V9, ncol=2, nrow=1)
+pdf(file="Fig2_beta.pdf", width=7, height=3.25, bg="white", useDingbats = FALSE)
+plot(Fig2.beta)
+dev.off()
+
+
+#### Only DEP Samples
+### V4 NMDS
+Fall.V4.DEP.nmds.bray = metaMDS(t(otu_table(Fall_DEP_V4)), distance = "bray", k=2, trymax = 50)
+stressplot(Fall.V4.DEP.nmds.bray)
+
+## Make dataframe of scores and metadata
+Fall.V4.DEP.nmds.bray.df = data.frame(scores(Fall.V4.DEP.nmds.bray, dispaly=c("sites")), sample_data(Fall_DEP_V4)$Borough)
+colnames(Fall.V4.DEP.nmds.bray.df) = c("NMDS1", "NMDS2", "Borough")
+Fall.V4.DEP.nmds.bray.df$Borough = factor(Fall.V4.DEP.nmds.bray.df$Borough, levels=c("Bk", "BQ", "Qu", "SI", "Bx","BM", "M"))
+
+### Test for significant differences
+## re-createe the distance matrix used
+Fall.V4.DEP.nmds.bray.dist = metaMDSredist(Fall.V4.DEP.nmds.bray)
+## adonis test
+DEP.V4.test = adonis(Fall.V4.DEP.nmds.bray.dist ~ Borough, data = Fall.V4.DEP.nmds.bray.df, permutations = 10000)
+
+### V9 NMDS
+Fall.V9.DEP.nmds.bray = metaMDS(t(otu_table(Fall_DEP_V9)), distance = "bray", k=2, trymax = 50)
+stressplot(Fall.V9.DEP.nmds.bray)
+
+## Make dataframe of scores and metadata
+Fall.V9.DEP.nmds.bray.df = data.frame(scores(Fall.V9.DEP.nmds.bray, dispaly=c("sites")), sample_data(Fall_DEP_V9)$Borough)
+colnames(Fall.V9.DEP.nmds.bray.df) = c("NMDS1", "NMDS2", "Borough")
+Fall.V9.DEP.nmds.bray.df$Borough = factor(Fall.V9.DEP.nmds.bray.df$Borough, levels=c("Bk", "BQ", "Qu", "SI", "Bx","BM", "M"))
+
+### Test for significant differences
+## re-createe the distance matrix used
+Fall.V9.DEP.nmds.bray.dist = metaMDSredist(Fall.V9.DEP.nmds.bray)
+## adonis test
+DEP.V9.test = adonis(Fall.V9.DEP.nmds.bray.dist ~ Borough, data = Fall.V9.DEP.nmds.bray.df, permutations = 10000)
+
+
+### Make the NMDS beta diversity plots
+
+## Plot Borough Shapes
+# Bk - open square: 0
+# BQ - star: 8
+# Qu - filled triangle: 17
+# SI - filled circle: 19
+# Bx - open circle: 1
+# BM - x: 4
+# M - open diamond: 5
+
+## V4
+DEP.BetaV4 = ggplot(Fall.V4.DEP.nmds.bray.df, aes(x=NMDS1, y=NMDS2, shape = Borough)) + geom_point(size=2)
+DEP.BetaV4 = DEP.BetaV4 + scale_shape_manual(values=c(0,8,17,19,1,4,5))
+DEP.BetaV4 = DEP.BetaV4 + theme(axis.title.x=element_text(size=10, family="Arial"), axis.text.x=element_text(size=10, family="Arial"), axis.title.y=element_text(size=10, family="Arial"), axis.text.y=element_text(size=10, family="Arial"))
+DEP.BetaV4 = DEP.BetaV4 + theme(legend.title=element_text(size=10, family="Arial", face = "bold"), legend.text=element_text(size=10, family="Arial"))
+DEP.BetaV4 = DEP.BetaV4 + theme(legend.position="bottom", legend.justification="center", legend.key.size=unit(0.5, "cm"), legend.key.width=unit(0.7, "cm"), legend.key=element_rect(fill="white"), panel.grid.minor=element_blank()) + guides(shape=guide_legend(nrow=1))
+
+# Get the legend to make a common one
+Fall.borough.legend = get_legend(DEP.BetaV4)
+# Plot the legend by itself
+pdf(file="Fall_borough_shape.pdf", width=4.2, height=0.17, bg="white", useDingbats = FALSE)
+plot(Fall.borough.legend)
+dev.off()
+# Remove legend from plot
+DEP.BetaV4 = DEP.BetaV4 + theme(legend.position="none", plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+## V9
+DEP.BetaV9 = ggplot(Fall.V9.DEP.nmds.bray.df, aes(x=NMDS1, y=NMDS2, shape = Borough)) + geom_point(size=2)
+DEP.BetaV9 = DEP.BetaV9 + scale_shape_manual(values=c(0,8,17,19,1,4,5), guide="none") 
+DEP.BetaV9 = DEP.BetaV9 + theme(axis.title.x=element_text(size=10, family="Arial"), axis.text.x=element_text(size=10, family="Arial"), axis.title.y=element_text(size=10, family="Arial"), axis.text.y=element_text(size=10, family="Arial"))
+DEP.BetaV9 = DEP.BetaV9 + theme(legend.title=element_text(size=10, family="Arial", face = "bold"), legend.text=element_text(size=10, family="Arial"))
+DEP.BetaV9 = DEP.BetaV9 + theme(panel.grid.minor=element_blank(), plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+## Make one figure
+FigS2 = grid.arrange(DEP.BetaV4, DEP.BetaV9, ncol=2, nrow=1)
+pdf(file="FigS2.pdf", width=7, height=4, bg="white", useDingbats = FALSE)
+plot(FigS2)
+dev.off()
+
+
+
+save.image("~/Desktop/Sewage_paper/Fall_analysis.RData")
+
+
+

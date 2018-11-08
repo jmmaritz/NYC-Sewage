@@ -1,0 +1,400 @@
+
+####  NYC Sewage Longitudinal 18S rRNA gene R Diversity Analysis - V4 and V9 regions run simultaniously
+
+
+## R data analysis workflow used in manuscript:
+##
+##
+##
+
+
+
+############### Load in the Data ###############
+
+library("phyloseq")
+library("vegan")
+library("reshape2")
+
+library("ggplot2")
+library("Hmisc")
+library("gridExtra")
+library("extrafont")
+
+setwd("~/Desktop/Sewage_paper/Year_analysis")
+
+#### V4
+otufile = "V4_Year_protist_fungi_otu_table_af_001_filtered_sorted.biom"
+mapfile = "Year_mapp.txt"
+
+qiimedataV4 = import_biom(BIOMfilename=otufile)
+mapdata = import_qiime(mapfilename=mapfile)
+
+Year_V4_DEP = merge_phyloseq(qiimedataV4, mapdata)
+
+
+#### V9
+otufile = "Sloan_project_all_seqs_otu_table_w_tax_noextra_protist_fungi_DEP_af_001_YEAR_filtered_sorted.biom"
+
+qiimedataV9 = import_biom(BIOMfilename=otufile)
+
+Year_V9_DEP = merge_phyloseq(qiimedataV9, mapdata)
+
+
+#### Get variables organized
+Variables=data.frame(sample_data(Year_V4_DEP))
+
+SampleID = Variables$SampleID
+Borough = Variables$Borough
+Season = Variables$Collection_Date
+V9_MiseqRun = Variables$V9_Miseq_run
+V4_MiseqRun = Variables$V4_miseq_run
+Biomass = Variables$Biomass
+Conductivity = Variables$Conductivity
+Chloride = Variables$Chloride
+CBOD = Variables$CBOD
+TSS = Variables$TSS
+Flow = Variables$Flow
+Area = Variables$Area
+Population = Variables$Population
+
+
+
+############### Alpha Diversity Analysis ###############
+
+#### Import the Shannon diversity calculated in QIIME
+### V4
+V4_Shannon = read.table("V4_Year_protist_fungi_otu_table_af_001_filtered_sorted_alpha_50000.txt")
+
+### V9
+V9_Shannon = read.table("Sloan_project_all_seqs_otu_table_w_tax_noextra_protist_fungi_DEP_af_001_YEAR_filtered_sorted_alpha_90000.txt")
+
+#### Make dataframe of all data for both regions
+Year.alpha = data.frame(Season, Borough, Population, Area, Flow, Conductivity, Chloride, TSS, CBOD, Biomass, V9_Shannon, V4_Shannon, row.names = SampleID)
+colnames(Year.alpha) = c("Season", "Borough", "Population", "Area", "Flow", "Conductivity", "Chloride", "TSS", "CBOD", "Biomass", "V9_Shannon", "V4_Shannon")
+Year.alpha$Season = factor(Year.alpha$Season, levels=c("Fall", "Winter", "Spring", "Summer"))
+Year.alpha$Borough = factor(Year.alpha$Borough, levels=c("Bk", "BQ", "Qu", "SI","Bx","BM", "M"))
+
+### Get mean and standard deviation per season
+means.alpha = apply(Year.alpha[,6:12], 2, function(x) tapply(x, Year.alpha$Season, mean))
+sd.alpha = apply(Year.alpha[,6:12], 2, function(x) tapply(x, Year.alpha$Season, sd))
+
+#### Test for significant differences
+### Kruskal Wallis test for Biomass and alpha diversity of different seasons
+
+XXXXXXXXXXXXXX
+
+### ********** Posthoc Wilcox tests with multiple testing correction to find pairwise differences between seasons
+yr.levs = levels(Year.alpha$Season)
+
+## Set up the pairwise tests
+phoc.test = function(x){
+  spair = (Year.alpha$Season %in% x)
+  phoc = wilcox.test(dist.met[spair] ~ Season[spair], 
+                     data=Year.alpha)
+  c(x, phoc$p.value)
+}
+
+## Biomass
+# Define the test matrix
+dist.met = Year.alpha$Biomass
+# Run the tests
+p.vals.biomass = combn(yr.levs,2, phoc.test)
+# Multiple testing correction
+p.vals.biomass.corrected = rbind(p.vals.biomass,
+                                 p.adjust(p.vals.biomass[3,], 
+                                          method="bonf"),
+                                 p.adjust(p.vals.biomass[3,],
+                                          method="fdr"))
+
+## V4 Shannon Diversity
+dist.met = Year.alpha$V4_Shannon
+yr.V4.p.vals = combn(yr.levs,2, phoc.test )
+yr.V4.p.vals.corrected = rbind(yr.V4.p.vals,
+                     p.adjust(yr.V4.p.vals[3,], 
+                              method="bonf"),
+                     p.adjust(yr.V4.p.vals[3,],
+                              method="fdr"))
+
+## V9 Shannon Diversity
+dist.met = Year.alpha$V9_Shannon
+yr.V9.p.vals = combn(yr.levs,2, phoc.test )
+yr.V9.p.vals.corrected = rbind(yr.V9.p.vals,
+                     p.adjust(yr.V9.p.vals[3,], 
+                              method="bonf"),
+                     p.adjust(yr.V9.p.vals[3,],
+                              method="fdr"))
+
+### Correlation of variables
+## Biomass and TSS
+with(Year.alpha, 
+     cor(Biomass, TSS, method="spearman"))
+
+## V4 alpha diversity correlation with all other variables
+V4.cor.mat = with(Year.alpha,
+                  cor(cbind(Conductivity,Chloride,CBOD,TSS,Biomass,Flow,Area,Population,V4_Shannon), method="spearman"))
+write.table(V4.cor.mat, "V4.cor.txt", sep="\t", quote=FALSE)
+
+## V9 alpha diversity correlation with all other variables
+V9.cor.mat = with(Year.alpha,
+                  cor(cbind(Conductivity,Chloride,CBOD,TSS,Biomass,Flow,Area,Population,V9_Shannon), method="spearman"))
+write.table(V9.cor.mat, "V9.cor.txt", sep="\t", quote=FALSE)
+
+## Correlation of Shannon Diversity of both regions
+#both alpha
+with(Year.alpha, 
+     cor(V9_Shannon, V4_Shannon, method="spearman"))
+
+#### Make the alpha diversity scatter plots
+
+### Plot Borough Shapes
+# Bk - open square: 0
+# BQ - star: 8
+# Qu - filled triangle: 17
+# SI - filled circle: 19
+# Bx - open circle: 1
+# BM - x: 4
+# M - open diamond: 5
+
+## Use the same legend created in the NYC Cross Sectional Analysis in final figure
+
+### Biomass
+Year.biomass = ggplot(Year.alpha, aes(x=Season, y=Biomass)) + geom_jitter(size=2, aes(shape=Borough, color=Season), width = 0.35)
+Year.biomass = Year.biomass + scale_y_continuous(name="DNA extracted (ng/uL)") + scale_x_discrete("Season", breaks=c("Fall", "Winter", "Spring", "Summer"))
+Year.biomass = Year.biomass + scale_shape_manual(values=c(0,8,17,19,1,4,5), guide="none")
+Year.biomass = Year.biomass + scale_color_manual(values=c("grey40","grey40","grey40","grey40"), guide="none")
+Year.biomass = Year.biomass + stat_summary(fun.data = "mean_sdl", fun.args = list(mult = 1), colour = "black", geom = "errorbar", width = 0.25, size=0.75) + stat_summary(fun.y = "mean", colour = "black", geom = "point", size = 2, shape=15)
+Year.biomass = Year.biomass + theme(axis.title.x=element_blank(), axis.text.x=element_text(size=10, family="Arial", color="black", hjust=1, angle=60), axis.ticks.x=element_line(color="black", size=1), axis.line.x=element_line(size=1, color="black", linetype="solid"), panel.grid.major.x=element_blank())
+Year.biomass = Year.biomass + theme(axis.title.y=element_text(size=10, family="Arial", color="black"), axis.text.y=element_text(size=10, family="Arial", color="black"), axis.ticks.y=element_line(color="black", size=1), axis.line.y=element_line(size=1, color="black", linetype="solid"), panel.grid.major.y=element_line(color="grey90", linetype="dashed"))
+Year.biomass = Year.biomass + theme(axis.ticks.length=unit(0.2, "cm"), panel.background=element_rect(fill="white"), panel.grid.minor=element_blank(), plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+### V4 Shannon Diversity
+AlphaV4 = ggplot(Year.alpha, aes(x=Season, y=V4_Shannon)) + geom_jitter(size=2, aes(shape=Borough, color=Season), width = 0.32)
+AlphaV4 = AlphaV4 + scale_y_continuous(name="Shannon Diversity Index", breaks=seq(2,8,2)) + scale_x_discrete("Season", breaks=c("Fall", "Winter", "Spring", "Summer"))
+AlphaV4 = AlphaV4 + scale_shape_manual(values=c(0,8,17,19,1,4,5), guide="none")
+AlphaV4 = AlphaV4 + scale_color_manual(values=c("grey40","grey40","grey40","grey40"), guide="none")
+AlphaV4 = AlphaV4 + stat_summary(fun.data = "mean_sdl", fun.args = list(mult = 1), colour = "black", geom = "errorbar", width = 0.25, size=0.75) + stat_summary(fun.y = "mean", colour = "black", geom = "point", size = 2, shape=15)
+AlphaV4 = AlphaV4 + theme(axis.title.x=element_blank(), axis.text.x=element_text(size=10, family="Arial", color="black", hjust=1, angle=60), axis.ticks.x=element_line(color="black", size=1), axis.line.x=element_line(size=1, color="black", linetype="solid"), panel.grid.major.x=element_blank())
+AlphaV4 = AlphaV4 + theme(axis.title.y=element_text(size=10, family="Arial", color="black"), axis.text.y=element_text(size=10, family="Arial", color="black"), axis.ticks.y=element_line(color="black", size=1), axis.line.y=element_line(size=1, color="black", linetype="solid"), panel.grid.major.y=element_line(color="grey90", linetype="dashed")) 
+AlphaV4 = AlphaV4 + theme(axis.ticks.length=unit(0.2, "cm"), panel.background=element_rect(fill="white"), panel.grid.minor=element_blank(), plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+### V9 Shannon Diversity
+AlphaV9 = ggplot(Year.alpha, aes(x=Season, y=V9_Shannon)) + geom_jitter(size=2, aes(shape=Borough, color=Season), width = 0.32)
+AlphaV9 = AlphaV9 + scale_y_continuous(name="Shannon Diversity Index", breaks=seq(2,8,2)) + scale_x_discrete("Season", breaks=c("Fall", "Winter", "Spring", "Summer"))
+AlphaV9 = AlphaV9 + scale_shape_manual(values=c(0,8,17,19,1,4,5), guide="none")
+AlphaV9 = AlphaV9 + scale_color_manual(values=c("grey40","grey40","grey40","grey40"), guide="none")
+AlphaV9 = AlphaV9 + stat_summary(fun.data = "mean_sdl", fun.args = list(mult = 1), colour = "black", geom = "errorbar", width = 0.25, size=0.75) + stat_summary(fun.y = "mean", colour = "black", geom = "point", size = 2, shape=15)
+AlphaV9 = AlphaV9 + theme(axis.title.x=element_blank(), axis.text.x=element_text(size=10, family="Arial", color="black", hjust=1, angle=60), axis.ticks.x=element_line(color="black", size=1), axis.line.x=element_line(size=1, color="black", linetype="solid"), panel.grid.major.x=element_blank())
+AlphaV9 = AlphaV9 + theme(axis.title.y=element_text(size=10, family="Arial", color="black"), axis.text.y=element_text(size=10, family="Arial", color="black"), axis.ticks.y=element_line(color="black", size=1), axis.line.y=element_line(size=1, color="black", linetype="solid"), panel.grid.major.y=element_line(color="grey90", linetype="dashed")) 
+AlphaV9 = AlphaV9 + theme(axis.ticks.length=unit(0.2, "cm"), panel.background=element_rect(fill="white"), panel.grid.minor=element_blank(), plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+### Make one figure
+FigS3 = grid.arrange(Year.biomass, AlphaV4, AlphaV9, ncol=3, nrow=1)
+pdf(file="FigS3.pdf", width=7, height=4, bg="white", useDingbats = FALSE)
+plot(FigS3)
+dev.off()
+
+
+
+############### Beta Diversity Analysis ###############
+
+#### V4
+### NMDS
+V4.nmds.bray = metaMDS(t(otu_table(Year_V4_DEP)), distance = "bray", k=2, trymax = 50)
+# Stress=0.22
+stressplot(V4.nmds.bray)
+
+## Make dataframe of scores and metadata
+V4.nmds.bray.df = data.frame(scores(V4.nmds.bray, dispaly=c("sites")), Season, Borough, V4_MiseqRun)
+V4.nmds.bray.df$Season = factor(V4.nmds.bray.df$Season, levels=c("Fall", "Winter", "Spring", "Summer"))
+V4.nmds.bray.df$Borough <- factor(V4.nmds.bray.df$Borough, levels = c("Bk", "BQ", "Qu", "SI", "Bx","BM", "M"))
+
+### Test for significant differences
+## re-create the distance matrix used
+V4.nmds.bray.dist = metaMDSredist(V4.nmds.bray)
+## adonis test
+V4.test = adonis(V4.nmds.bray.dist ~ Season + Borough, data = V4.nmds.bray.df, permutations = 10000, by = "terms")
+## Multiple testing correction
+p.adjust(V4.test$aov.tab[,6])
+
+#### V9
+### NMDS
+V9.nmds.bray = metaMDS(t(otu_table(Year_V9_DEP)), distance = "bray", k=2, trymax = 50)
+# Stress=0.20
+stressplot(V9.nmds.bray)
+
+## Make dataframe of scores and metadata
+V9.nmds.bray.df = data.frame(scores(V9.nmds.bray, dispaly=c("sites")), Season, Borough, V9_MiseqRun)
+V9.nmds.bray.df$Season = factor(V9.nmds.bray.df$Season, levels=c("Fall", "Winter", "Spring", "Summer"))
+V9.nmds.bray.df$Borough <- factor(V9.nmds.bray.df$Borough, levels = c("Bk", "BQ", "Qu", "SI", "Bx","BM", "M"))
+
+### Test for significant differences
+## re-create the distance matrix used
+V9.nmds.bray.dist = metaMDSredist(V9.nmds.bray)
+## adonis test
+V9.test = adonis(V9.nmds.bray.dist ~ Season + Borough, data = V9.nmds.bray.df, permutations = 10000, by = "terms")
+## Multiple testing correction
+p.adjust(V9.test$aov.tab[,6])
+
+#### Make the NMDS beta diversity plots
+### By Miseq run
+Run.Year.NMDS.V4 = ggplot(V4.nmds.bray.df, aes(x=NMDS1, y=NMDS2, color = V4_MiseqRun)) + geom_point(size=2)
+Run.Year.NMDS.V9 = ggplot(V9.nmds.bray.df, aes(x=NMDS1, y=NMDS2, color = V9_MiseqRun)) + geom_point(size=2)
+
+### By Season and Borough
+
+## Plot Season Colors
+# Fall - dark green: #0a6650
+# Winter - blue: #2b61af
+# Spring - dark purple: #5b1c19
+# Summer - peach: #f16469
+
+## Plot Borough Shapes
+# Bk - open square: 0
+# BQ - star: 8
+# Qu - filled triangle: 17
+# SI - filled circle: 19
+# Bx - open circle: 1
+# BM - x: 4
+# M - open diamond: 5
+
+## V4 - only make legend for season
+V4.year = ggplot(V4.nmds.bray.df, aes(x=NMDS1, y=NMDS2, color = Season, shape=Borough)) + geom_point(size=2)
+V4.year = V4.year + scale_color_manual(name="Season", values=c("#0a6650","#2b61af","#5b1c19","#f16469"))
+V4.year = V4.year + scale_shape_manual(values=c(0,8,17,19,1,4,5), guide = "none")
+V4.year = V4.year + theme(axis.title.x=element_text(size=10, family="Arial"), axis.text.x=element_text(size=10, family="Arial"))
+V4.year = V4.year + theme(axis.title.y=element_text(size=10, family="Arial"), axis.text.y=element_text(size=10, family="Arial"))
+V4.year = V4.year + theme(panel.grid.minor=element_blank())
+V4.year = V4.year + theme(legend.title=element_text(size=10, family="Arial", face = "bold"), legend.text=element_text(size=10, family="Arial"))
+V4.year = V4.year + theme(legend.position="bottom", legend.justification="center", legend.key.height=unit(0.5, "cm"), legend.key.width=unit(1.0, "cm"), legend.key=element_rect(fill="white")) + guides(color=guide_legend(override.aes = list(size=3),nrow=1))
+
+# Get the legend to make a common one
+get_legend<-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+Year.season.legend = get_legend(V4.year)
+# Plot the legend by itself
+pdf(file="Year_season.pdf", width=7, height=0.17, bg="white", useDingbats = FALSE)
+plot(Year.season.legend)
+dev.off()
+# Remove legend from plot
+V4.year = V4.year + theme(legend.position="none", plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+## V9 - no legend (use the same legend created in the NYC Cross Sectional Analysis in final figure)
+V9.year = ggplot(V9.nmds.bray.df, aes(x=NMDS1, y=NMDS2, color = Season, shape=Borough)) + geom_point(size=2)
+V9.year = V9.year + scale_color_manual(name="Season", values=c("#0a6650","#2b61af","#5b1c19","#f16469"), guide = "none")
+V9.year = V9.year + scale_shape_manual(values=c(0,8,17,19,1,4,5), guide = "none")
+V9.year = V9.year + theme(axis.title.x=element_text(size=10, family="Arial"), axis.text.x=element_text(size=10, family="Arial"))
+V9.year = V9.year + theme(axis.title.y=element_text(size=10, family="Arial"), axis.text.y=element_text(size=10, family="Arial"))
+V9.year = V9.year + theme(panel.grid.minor=element_blank(), plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+
+## Make one figure
+Fig5.beta = grid.arrange(V4.year, V9.year, ncol=2, nrow=1)
+pdf(file="Fig5_beta.pdf", width=7, height=3.25, bg="white", useDingbats = FALSE)
+plot(Fig5.beta)
+dev.off()
+
+
+
+############### Core Community Analysis ###############
+
+#### Transform data into binary matrix
+## 1 = present
+## 0 = not
+
+### V4
+data.binary.V4 = transform_sample_counts(Year_V4_DEP, function(x) ifelse(x >= 1, 1, 0 ) )
+
+### V9
+data.binary.V9 = transform_sample_counts(Year_V9_DEP, function(x) ifelse(x >= 1, 1, 0 ) )
+
+#### Core OTUs, all samples = 136
+### V4
+core_otus_V4 = prune_taxa(taxa_sums(data.binary.V4) == 136, data.binary.V4)
+## Get only core OTUs from original dataset
+coretaxaV4 = prune_taxa(taxa_names(otu_table(core_otus_V4)), Year_V4_DEP)
+## Get percent of total reads attributed to core OTUs
+sum(taxa_sums(coretaxaV4)) / sum(sample_sums(Year_V4_DEP)) *100
+
+### V9
+core_otus_V9 = prune_taxa(taxa_sums(data.binary.V9) == 136, data.binary.V9)
+coretaxaV9 = prune_taxa(taxa_names(otu_table(core_otus_V9)), Year_V9_DEP)
+sum(taxa_sums(coretaxaV9)) / sum(sample_sums(Year_V9_DEP)) *100
+
+#### Core OTUs, 95% of samples = 130
+### V4
+core95_otus_V4 = prune_taxa(taxa_sums(data.binary.V4) >= 130, data.binary.V4)
+core95taxaV4 = prune_taxa(taxa_names(otu_table(core95_otus_V4)), Year_V4_DEP)
+sum(taxa_sums(core95taxaV4)) / sum(sample_sums(Year_V4_DEP)) *100
+
+### V9
+core95_otus_V9 = prune_taxa(taxa_sums(data.binary.V9) >= 130, data.binary.V9)
+core95taxaV9 = prune_taxa(taxa_names(otu_table(core95_otus_V9)), Year_V9_DEP)
+sum(taxa_sums(core95taxaV9)) / sum(sample_sums(Year_V9_DEP)) *100
+
+#### Find out how many core (95%) OTUs are 'unidentified' OTUs
+### V4
+Year_V4_DEP_core95_unidentified = subset_taxa(core95taxaV4, Rank1=="No blast hit")
+## Get percent of core reads attributed to 'unidentified' core OTUs
+sum(taxa_sums(Year_V4_DEP_core95_unidentified)) / sum(sample_sums(coretaxaV4)) *100
+## Get percent of total reads attributed to 'unidentified' core OTUs
+sum(taxa_sums(Year_V4_DEP_core95_unidentified)) / sum(sample_sums(Year_V4_DEP)) *100
+
+### V9
+Year_V9_DEP_core95_unidentified = subset_taxa(core95taxaV9, Rank1=="No blast hit")
+sum(taxa_sums(Year_V9_DEP_core95_unidentified)) / sum(sample_sums(coretaxaV9)) *100
+sum(taxa_sums(Year_V9_DEP_core95_unidentified)) / sum(sample_sums(Year_V9_DEP)) *100
+
+#### Investigate per sample metrics
+### Transform data into relative abundances
+## V4
+Year_V4_DEP_norm = transform_sample_counts(Year_V4_DEP, function(x){ x / sum(x)})
+## V9
+Year_V9_DEP_norm = transform_sample_counts(Year_V9_DEP, function(x){ x / sum(x)})
+
+### Get only the Core (95%) Taxa
+## V4
+Year_V4_DEP_norm_core95 = prune_taxa(taxa_names(otu_table(core95_otus_V4)), Year_V4_DEP_norm)
+## V9
+Year_V9_DEP_norm_core95 = prune_taxa(taxa_names(otu_table(core95_otus_V9)), Year_V9_DEP_norm)
+
+### Get the mean, min and max % of core reads for each sample
+## V4
+mean(sample_sums(Year_V4_DEP_norm_core95))
+min(sample_sums(Year_V4_DEP_norm_core95))
+max(sample_sums(Year_V4_DEP_norm_core95))
+
+## V9
+mean(sample_sums(Year_V9_DEP_norm_core95))
+min(sample_sums(Year_V9_DEP_norm_core95))
+max(sample_sums(Year_V9_DEP_norm_core95))
+
+#### Investigate Taxonomy of Core OTUs
+### V4
+## Make merged OTU table from biological replicates
+Year_V4_DEP_collapsed = merge_samples(Year_V4_DEP, "Sample")
+## Normalize it to relative abundance
+Year_V4_DEP_collapsed_norm = transform_sample_counts(Year_V4_DEP_collapsed, function(x){ x / sum(x)})
+## Make OTU table with only the core OTUs
+Year_V4_DEP_collapsed_norm_core95 = prune_taxa(taxa_names(otu_table(core95_otus_V4)), Year_V4_DEP_collapsed_norm)
+## Export everything
+write.table(t(otu_table(Year_V4_DEP_collapsed_norm_core95)), "Year_V4_DEP_collapsed_norm_core95_abundances.txt", sep="\t", quote=FALSE)
+write.table(tax_table(Year_V4_DEP_collapsed_norm_core95), "Year_V4_DEP_collapsed_norm_core95_taxonomy.txt", sep="\t", quote=FALSE)
+
+### V9
+Year_V9_DEP_collapsed = merge_samples(Year_V9_DEP, "Sample")
+Year_V9_DEP_collapsed_norm = transform_sample_counts(Year_V9_DEP_collapsed, function(x){ x / sum(x)})
+Year_V9_DEP_collapsed_norm_core95 = prune_taxa(taxa_names(otu_table(core95_otus_V9)), Year_V9_DEP_collapsed_norm)
+write.table(t(otu_table(Year_V9_DEP_collapsed_norm_core95)), "Year_V9_DEP_collapsed_norm_core95_abundances.txt", sep="\t", quote=FALSE)
+write.table(tax_table(Year_V9_DEP_collapsed_norm_core95), "Year_V9_DEP_collapsed_norm_core95_taxonomy.txt", sep="\t", quote=FALSE)
+
+
+############### Human/Animal Taxa Heatmaps ###############
+
+
+
+
+save.image("~/Desktop/Sewage_paper/Year_analysis.RData")
+

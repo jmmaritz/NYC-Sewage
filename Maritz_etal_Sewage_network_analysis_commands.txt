@@ -1,0 +1,282 @@
+
+#### NYC Sewage Longitudinal 18S rRNA gene Network Analysis - V4 and V9 regions run simultaniously
+
+
+### QIIME data analysis workflow used in manuscript:
+##
+##
+
+
+### This data analysis was carried out on New York University's High Performance Compute cluster and on a local computer
+## The same .RData file was used in both places
+## Parameters and file paths may vary on your system
+## Edit commands as necessary to replicate these data analysis locally
+
+
+### Make sure that you have all the necessary packages installed on your local computer and/or the cluster
+
+## Required to load in the data
+library("biomformat")
+
+## Required to run SpiecEasi
+library("huge")
+library("MASS")
+library("VGAM")
+library("Matrix")
+library("SpiecEasi")
+
+## Required for the downstream analysis
+library("igraph")
+library("ggplot2")
+library("extrafont")
+library("plyr")
+library("openxlsx")
+
+
+############### Load in the Data ###############
+
+#### I loaded in the data on my local computer
+
+library("biomformat")
+
+setwd("~/Desktop/Sewage_paper/Network_analysis")
+
+### Load in the OTU tables and put them in matrix format
+## All files have to be in the same folder for this to work
+files = list.files(pattern="*.biom")
+
+## Get variables for names sorted out
+region=as.character(c(rep("V4", times=4), rep("V9", times=4)))
+season=as.character(rep(c("Fall", "Spring", "Summer", "Winter"), times=2))
+identities=paste0(season, "_", region, "_", "otu_table")
+
+## Creates a list off all 8 OTU tables in matrix format
+datasets = lapply(files, function(x){
+dat=read_biom(x)
+mydata=as.matrix(biom_data(dat))
+mydata=t(mydata)
+})
+names(datasets) = identities
+
+## Splits the list into each component
+list2env(datasets, envir=.GlobalEnv)
+
+## Save the .RData file
+save.image("~/Desktop/Sewage_paper/Network_analysis/DEP_Network.RData")
+
+
+
+############### Perform Network analysis ###############
+
+#### Transfer the DEP_Network.RData file to the cluster
+## Using the cluster was required for this due to the large dataset and memory requirements
+## Even on the cluster the program took a several hours and a large amount of memory
+## I recommend saving after every network in case the job runs out of time
+
+
+#### Create 'DEP_season_networks.R' on the cluster with the following commands:
+library("huge")
+library("MASS")
+library("VGAM")
+library("Matrix")
+library("SpiecEasi")
+
+load("DEP_Network.RData")
+
+### Use the mb aka Neighborhood selection method
+
+## V4 season networks
+se.mb.V4.Fall = spiec.easi(Fall_V4_otu_table, method='mb', nlambda=20, lambda.min.ratio=1e-2,  icov.select.params=list(rep.num=50, ncores=8))
+ig.mb.V4.Fall = adj2igraph(se.mb.V4.Fall$refit)
+save.image("DEP_Network.RData")
+
+se.mb.V4.Winter = spiec.easi(Winter_V4_otu_table, method='mb', nlambda=20, lambda.min.ratio=1e-2,  icov.select.params=list(rep.num=50, ncores=8))
+ig.mb.V4.Winter = adj2igraph(se.mb.V4.Winter$refit)
+save.image("DEP_Network.RData")
+
+se.mb.V4.Spring = spiec.easi(Spring_V4_otu_table, method='mb', nlambda=20, lambda.min.ratio=1e-2,  icov.select.params=list(rep.num=50, ncores=8))
+ig.mb.V4.Spring = adj2igraph(se.mb.V4.Spring$refit)
+save.image("DEP_Network.RData")
+
+se.mb.V4.Summer = spiec.easi(Summer_V4_otu_table, method='mb', nlambda=20, lambda.min.ratio=1e-2,  icov.select.params=list(rep.num=50, ncores=8))
+ig.mb.V4.Summer = adj2igraph(se.mb.V4.Summer$refit)
+save.image("DEP_Network.RData")
+
+## V9 season networks
+se.mb.V9.Fall = spiec.easi(Fall_V9_otu_table, method='mb', nlambda=20, lambda.min.ratio=1e-2,  icov.select.params=list(rep.num=50, ncores=8))
+ig.mb.V9.Fall = adj2igraph(se.mb.V9.Fall$refit)
+save.image("DEP_Network.RData")
+
+se.mb.V9.Winter = spiec.easi(Winter_V9_otu_table, method='mb', nlambda=20, lambda.min.ratio=1e-2,  icov.select.params=list(rep.num=50, ncores=8))
+ig.mb.V9.Winter = adj2igraph(se.mb.V9.Winter$refit)
+save.image("DEP_Network.RData")
+
+se.mb.V9.Spring = spiec.easi(Spring_V9_otu_table, method='mb', nlambda=20, lambda.min.ratio=1e-2,  icov.select.params=list(rep.num=50, ncores=8))
+ig.mb.V9.Spring = adj2igraph(se.mb.V9.Spring$refit)
+save.image("DEP_Network.RData")
+
+se.mb.V9.Summer = spiec.easi(Summer_V9_otu_table, method='mb', nlambda=20, lambda.min.ratio=1e-2,  icov.select.params=list(rep.num=50, ncores=8))
+ig.mb.V9.Summer = adj2igraph(se.mb.V9.Summer$refit)
+save.image("DEP_Network.RData")
+
+
+#### Create 'DEP_season_networks.sh' on the cluster with the following commands:
+#!/bin/sh
+
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=80:00:00
+#SBATCH --mem=50GB
+#SBATCH --job-name=DEP_season_networks
+#SBATCH --output=slurm_DEP_season_net_%j.out
+	
+module purge
+module load r/intel/3.3.2
+ 
+cd /DEP/Network
+
+R --no-save -q -f DEP_season_networks.R
+
+
+#### After the job has finished transfer 'DEP_Network.RData' back to your local computer for analysis of network properties
+
+
+
+############### Analysis of Network Properties ###############
+
+library("igraph")
+library("ggplot2")
+library("reshape2")
+library("gridExtra")
+library("extrafont")
+
+setwd("~/Desktop/Sewage_paper/Network_analysis")
+load("~/Desktop/Sewage_paper/Network_analysis/DEP_Network.RData")
+
+
+#### Calculate network properties for all 8 networks
+
+### Make list of all 8 networks
+netlist = list(V4.Fall=ig.mb.V4.Fall,V4.Spring=ig.mb.V4.Spring,V4.Summer=ig.mb.V4.Summer,V4.Winter=ig.mb.V4.Winter,V9.Fall=ig.mb.V9.Fall,V9.Spring=ig.mb.V9.Spring,V9.Summer=ig.mb.V9.Summer,V9.Winter=ig.mb.V9.Winter)
+
+### Calculate various properties for each network
+Properties = sapply(netlist, function(x){
+  c(
+    nodes=vcount(x),
+    edges=ecount(x),
+    mean.deg=mean(degree(x)),
+    min.deg=min(degree(x)),
+    max.deg=max(degree(x)),
+    cent.deg=centr_degree(x)$centralization,
+    dist=mean_distance(x),
+    diameter=diameter(x),
+    mean.closeness=mean(closeness(x, normalized = TRUE)),
+    cent.closeness=centr_clo(x)$centralization,
+    components=count_components(x),
+    density=edge_density(x)
+  )
+})
+
+### Export the table
+DEP_Network_properties = createWorkbook()
+addWorksheet(DEP_Network_properties, sheetName = "Properties")
+writeData(DEP_Network_properties, Properties, Properties)
+saveWorkbook(DEP_Network_properties, file = "DEP_Network_properties.xlsx", overwrite = TRUE)
+
+
+############### Keystone Species Analysis ###############
+
+#### Calculate the degree and closeness centrality for each node in the netowrk
+Keystone = sapply(netlist, function(x){
+cbind(
+Degree=degree(x),
+Closeness_centrality=closeness(x, normalized=TRUE))
+})
+
+### Get the taxonomic assignments for all the nodes
+tax_identities=paste0(region, ".", season)
+tax_datasets = lapply(files, function(x){
+dat=read_biom(x)
+mytax=observation_metadata(dat)
+})
+names(tax_datasets) = tax_identities
+tax_datasets = lapply(tax_datasets, function(x) cbind(OTUID=rownames(x), x))
+
+### Put everything into one big list
+Keystone_taxa=mapply(cbind, Keystone, tax_datasets, SIMPLIFY = FALSE)
+
+************* Fix for posting
+Test2=ldply(Keystone_taxa, data.frame)
+names(Test2) = c("Network","Degree","Closeness_centrality","OTUID","taxonomy1","taxonomy2","taxonomy3","taxonomy4","taxonomy5","taxonomy6","taxonomy7","taxonomy8","taxonomy9","taxonomy10","taxonomy11")
+Test2$Network = factor(Test2$Network, levels=c("V4.Fall","V4.Winter","V4.Spring","V4.Summer","V9.Fall","V9.Winter","V9.Spring","V9.summer"))
+
+
+### Export each element of the list to an excel spreadsheet
+Networks = unique(Test2$Network)
+Keystone_analysis = createWorkbook()
+for(i in Networks){
+  addWorksheet(Keystone_analysis, sheetName = i)
+  writeData(Keystone_analysis, i, Test2[Test2$Network==i,])
+  saveWorkbook(Keystone_analysis, file = "DEP_Keystone_analysis.xlsx", overwrite = TRUE)
+}
+
+
+********* Needs a bit of work
+### Core
+year_files = c("V4_Year_protist_fungi_otu_table_af_001_filtered_sorted.biom","Sloan_project_all_seqs_otu_table_w_tax_noextra_protist_fungi_DEP_af_001_YEAR_filtered_sorted.biom")
+
+year_datasets = lapply(year_files, function(x){
+  dat=read_biom(x)
+  mydata=as.matrix(biom_data(dat))
+  mydata=t(mydata)
+  mytax=observation_metadata(dat)
+})
+names(year_datasets) = c("V4_year_otu_table", "V9_year_otu_table")
+
+year_binary = lapply(year_datasets, function(x) ifelse(x >= 1, 1, 0 ))
+core_datasets = lapply(year_binary, function(x) x[,colSums(x)>=130])
+
+write.table(colnames(core_datasets[[1]]), "V4_core_otus.txt", col.names=F, row.names= F, sep="\t", quote= F)
+write.table(colnames(core_datasets[[2]]), "V9_core_otus.txt", col.names=F, row.names= F, sep="\t", quote= F)
+
+
+#### Make the keystone plots
+### For each of the 8 networks use the following template:
+## Plot closeness centrality and degree for each node.
+## Then make nodes with the highest closeness centrality cyan fill, size 1.5, line of 1,
+## and nodes with highest degree outlined in magenta, size 1.5, line of 1.
+## All other nodes are grey outline, size 0.5, line 0.5
+
+### Have to determine the highest degree and closeness centrality for each network using the files exported above
+## Replace 'XXX' with the values determined above for each network
+
+Keystone.plot = ggplot(Test2, aes(x=Closeness_centrality, y=Degree)) + geom_point(size=0.5)
+Keystone.plot = Keystone.plot + facet_wrap(~Network, scales="free", ncol=2)
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V4.Fall"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Degree>XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V4.Fall"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Closeness_centrality>0.XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V4.Winter"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Degree>XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V4.Winter"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Closeness_centrality>0.XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V4.Spring"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Degree>XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V4.Spring"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Closeness_centrality>0.XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V4.Summer"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Degree>XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V4.Summer"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Closeness_centrality>0.XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V9.Fall"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Degree>XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V9.Fall"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Closeness_centrality>0.XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V9.Winter"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Degree>XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V9.Winter"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Closeness_centrality>0.XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V9.Spring"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Degree>XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V9.Spring"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Closeness_centrality>0.XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V9.summer"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Degree>XXX,stroke=1))
+Keystone.plot = Keystone.plot + geom_point(data=subset(Test2, Network=="V9.summer"),shape=21, stroke=0.5, aes(colour=Degree>XXX,fill=Closeness_centrality>0.XXX,size=Closeness_centrality>0.XXX,stroke=1))
+Keystone.plot = Keystone.plot + scale_colour_manual(values = setNames(c('magenta','grey50'),c(T, F))) + scale_fill_manual(values = setNames(c('cyan','white'),c(T, F))) + scale_size_manual(values=c(0.5,1.5))
+Keystone.plot = Keystone.plot + theme(strip.background=element_rect(fill="white"), strip.text.x=element_text(size=10,family="Arial",color="black",margin=margin(0, 0, 0.07, 0, "cm")))
+Keystone.plot = Keystone.plot + theme(axis.title.x=element_text(size=11, family="Arial",color="black",face="bold"), axis.text.x=element_text(size=10, family="Arial",color="black"), axis.title.y=element_text(size=11, family="Arial",color="black",face="bold"), axis.text.y=element_text(size=10, family="Arial",color="black"))
+Keystone.plot = Keystone.plot + theme(panel.background=element_rect(fill="white"), panel.grid.minor=element_blank(), panel.grid.major = element_line(color="grey90"), plot.margin=unit(c(0.1,0.1,0.1,0.1), "cm"))
+Keystone.plot = Keystone.plot + theme(panel.border = element_rect(colour = "black", fill=NA, size=1), legend.position = "none")
+
+##Make one figure
+pdf(file="Keystone_plot.pdf", bg="white", width=7, height=8, useDingbats = FALSE)
+plot(Keystone.plot)
+dev.off()
+
+save.image("~/Desktop/Sewage_paper/Network_analysis/DEP_Network.RData")

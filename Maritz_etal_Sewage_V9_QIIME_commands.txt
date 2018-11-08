@@ -1,0 +1,436 @@
+
+#### 18S rRNA gene amplicon data - V9 WORKFLOW
+
+## QIIME data analysis workflow used in manuscript:
+##
+##
+
+## All data analysis carried out on New York University's High Performance Compute cluster
+## Parameters and file paths may vary on your system
+## Edit commands as necessary to replicate these data analysis locally
+
+
+
+############### Pre-processing the raw sequencing data ##############
+
+## Includes steps to remove adapters, join paired-end reads, demultiplex and quality filter
+## Repeat this script for as many runs as included in the study changing the paths and names accordingly
+
+## Trimming amplicon data with Trimmomatic requires you to create a custom adapter file
+## This file ('V9_adapters_palindrome.fa' in these commands) contained 6 sequences in FASTA format:
+## The PCR primer sequences (1391F and EUKBR) and their reverse compliments for 'simple' clipping
+## The PCR primer sequences (1391F and EUKBR) for 'palindrome' clipping
+## See the Trimmomatic manual for formatting requirements
+
+#!/bin/sh
+
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=6
+#SBATCH --time=15:00:00
+#SBATCH --mem=20GB
+#SBATCH --job-name=Nov_trim_pal
+#SBATCH --output=slurm_Nov_trim_pal_%j.out
+
+module purge
+module load trimmomatic/0.36
+module load seqtk/intel/1.2-r94
+module load qiime/intel/1.9.1
+module load ea-utils/intel/1.1.2
+
+# Change these paths according to where the project files are locally
+PRIMERS=/DEP/Primers
+MAPP=/DEP_V9/Nov2014
+NOV1=/V9/Nov2014/Run1
+NOV2=/V9/Nov2014/Run2
+SEQS=/V9/Seqs
+
+# Remove adapters
+srun java -jar /share/apps/trimmomatic/0.36/trimmomatic-0.36.jar PE -threads 6 -trimlog Nov_Run1_trimmomatic_log.txt \
+	$NOV1/R1_1.fastq.gz \
+	$NOV1/R2_1.fastq.gz \
+	$NOV1/Nov_Run1_R1_adapters_trimmed_pe.fastq.gz $NOV1/Nov_Run1_R1_adapters_trimmed_se.fastq.gz $NOV1/Nov_Run1_R2_adapters_trimmed_pe.fastq.gz $NOV1/Nov_Run1_R2_adapters_trimmed_se.fastq.gz \
+	ILLUMINACLIP:$PRIMERS/V9_adapters_palindrome.fa:2:30:10:2:true MINLEN:0 
+	
+	# 2 is the <minAdapterLength> option
+	# TRUE passes the <keepBothReads> flag to keep all reads
+	# MINLEN:0 makes sure all reads are kept
+	
+srun gunzip $NOV1/Nov_Run1_R1_adapters_trimmed_pe.fastq.gz
+
+# get the ids of all the paired-end reads that are kept and format them for seqtk
+	# seqtk does not like the '@' at the beginning of the read names or the '1:N:0:' after the space at the end
+grep "@M02455" $NOV1/Nov_Run1_R1_adapters_trimmed_pe.fastq | perl -pe 's/^@//g' | cut -f1,1 -d ' ' > $NOV1/Nov_Run1_adapters_trimmed_remaining_pe_read_IDs.lst
+
+# Make sure that the barcode file exactly matches that of the reads, otherwise you will get a QIIME error
+srun seqtk subseq $NOV1/I1_1.fastq.gz $NOV1/Nov_Run1_adapters_trimmed_remaining_pe_read_IDs.lst > $NOV1/Nov_Run1_adapters_trimmed_pe_barcodes.fastq
+
+# Join the trimmed, paired reads
+srun join_paired_ends.py -f $NOV1/Nov_Run1_R1_adapters_trimmed_pe.fastq \
+    -r $NOV1/Nov_Run1_R2_adapters_trimmed_pe.fastq.gz \
+    -b $NOV1/Nov_Run1_adapters_trimmed_pe_barcodes.fastq \
+    -o $NOV1/Nov1_fastq-join_joined_trimmed_min2 \
+    -j 2 -p 20
+    
+    -j 2 sets the minimum overlap to 2 bp
+    -p 20 allows up to a 20% mismatch in overlapping area
+
+# Repeat the same steps for the second run
+srun java -jar /share/apps/trimmomatic/0.36/trimmomatic-0.36.jar PE -threads 6 -trimlog Nov_Run2_trimmomatic_log.txt \
+	$NOV2/R1_2.fastq.gz \
+	$NOV2/R2_2.fastq.gz \
+	$NOV2/Nov_Run2_R1_adapters_trimmed_pe.fastq.gz $NOV2/Nov_Run2_R1_adapters_trimmed_se.fastq.gz $NOV2/Nov_Run2_R2_adapters_trimmed_pe.fastq.gz $NOV2/Nov_Run2_R2_adapters_trimmed_se.fastq.gz \
+	ILLUMINACLIP:$PRIMERS/V9_adapters_palindrome.fa:2:30:10:2:true MINLEN:0 
+
+srun gunzip $NOV2/Nov_Run2_R1_adapters_trimmed_pe.fastq.gz
+
+grep "@M02455" $NOV2/Nov_Run2_R1_adapters_trimmed_pe.fastq | perl -pe 's/^@//g' | cut -f1,1 -d ' ' > $NOV2/Nov_Run2_adapters_trimmed_remaining_pe_read_IDs.lst
+
+srun seqtk subseq $NOV2/I1_2.fastq.gz $NOV2/Nov_Run2_adapters_trimmed_remaining_pe_read_IDs.lst > $NOV2/Nov_Run2_adapters_trimmed_pe_barcodes.fastq
+
+srun join_paired_ends.py -f $NOV2/Nov_Run2_R1_adapters_trimmed_pe.fastq \
+    -r $NOV2/Nov_Run2_R2_adapters_trimmed_pe.fastq.gz \
+    -b $NOV2/Nov_Run2_adapters_trimmed_pe_barcodes.fastq \
+    -o $NOV2/Nov2_fastq-join_joined_trimmed_min2 \
+    -j 2 -p 20
+
+	# -j 2 minimum overlap of 2 bp required to join read pairs
+	# -p 20 maximum of 20% differences allowed in area of overlap
+
+# Demultiplex both runs together
+	# This only works if all samples have different barcodes, otherwise demultiplex separately
+srun split_libraries_fastq.py -i $NOV1/Nov1_fastq-join_joined_trimmed_min2/fastqjoin.join.fastq,$NOV2/Nov2_fastq-join_joined_trimmed_min2/fastqjoin.join.fastq \
+    -b $NOV1/Nov1_fastq-join_joined_trimmed_min2/fastqjoin.join_barcodes.fastq,$NOV2/Nov2_fastq-join_joined_trimmed_min2/fastqjoin.join_barcodes.fastq \
+    -m $MAPP/Nov_mapp_corrected.txt  \
+    -o $MAPP \
+    --rev_comp_mapping_barcodes -q 19 -r 5 -p 0.70
+
+	# --rev_comp_mapping_barcodes looks for the reverse compliment of the barcodes in the mapping file
+	# -q 19 minimum quality score of 20
+	# -r 5 allows 5 poor quality bases before read truncation
+	# -p 0.70 minimum fraction of consecutive high quality base calls to include a read
+
+# Move the demultiplexed sequences to one folder
+mv $MAPP/seqs.fna $SEQS/Nov_seqs_trimmed_joined_dmex.fna
+
+# Once you have done this for all runs, concatenate all the .fna files together
+
+
+############### 98% DE NOVO OTU Picking - 18S rRNA ##############
+
+##After putting all the sequence files together
+
+#!/bin/sh
+
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=60:00:00
+#SBATCH --mem=160GB
+#SBATCH --job-name=otus
+#SBATCH --output=slurm_otus_%j.out
+	
+module purge
+module load python/intel/2.7.12
+
+# Change these paths according to where the project files are locally
+PYTHON=/Python_scripts
+SEQS=/V9/Seqs
+RUNDIR=/V9/Uparse
+
+cd $RUNDIR
+
+# Dereplicate and remove singletons
+/share/apps/qiime/1.9.1/usearch64/usearch8.0.1623_i86linux64 -derep_fulllength $SEQS/V9_seqs_trimmed_joined_dmex.fna \
+	-fastaout $RUNDIR/V9_uniques_min2.fasta \
+	-sizeout -minuniquesize 2
+
+# Cluster OTUs
+/share/apps/qiime/1.9.1/usearch64/usearch8.0.1623_i86linux64 --cluster_otus $RUNDIR/V9_uniques_min2.fasta \
+	-otus $RUNDIR/V9_uniques_min2_otus_min2.fasta \
+	-uparseout $RUNDIR/V9_uniques_min2_otus_min2.up \
+	-relabel OTU_ -otu_radius_pct 2 -minsize 2
+
+	# -relable OTU_ changes the name of rep set sequences to OTU_
+	# -otu_radius_pct 2 clusters at 98%
+	# chimera filtering happens automatically
+
+# Map the reads back to the OTUs
+/share/apps/qiime/1.9.1/usearch64/usearch8.0.1623_i86linux64 -usearch_global $SEQS/V9_seqs_trimmed_joined_dmex.fna \
+	-db $RUNDIR/V9_uniques_min2_otus_min2.fasta \
+	-strand plus -id 0.98 \
+	-maxaccepts 8 -maxrejects 64 \
+	-top_hit_only \
+	-uc $RUNDIR/V9_otu_map.uc
+
+	# a given read may match two or more OTUs at the given identity threshold. 
+	# In such cases, usearch_global will tend to assign the read to the OTU with highest identity 
+	# and break ties arbitrarily 
+	# -maxaccepts 8 -maxrejects 64 help to mitigate issues above and get more consistent OTU assignments
+	# -top_hit_only breaks ties consistently by choosing the first target sequence in database order
+
+# Convert the UPARSE .uc file to a QIIME compatible OTU mat .txt file
+	# python script modified from the readmap2qiime.py script provided by USEARCH
+	# https://drive5.com/otupipe/readmap2qiime.txt
+perl -pe 's/;.*?;//g' $RUNDIR/V9_otu_map.uc > $RUNDIR/V9_otu_map_edited.uc
+
+python $PYTHON/readmap2qiime.py $RUNDIR/V9_otu_map_edited.uc > $RUNDIR/V9_otus.txt
+
+# Create file for rep set filtering to only the OTUs with reads mapping to them
+cut -f 10 $RUNDIR/V9_otu_map_edited.uc | sort -u > $RUNDIR/rep_seqs_to_keep.txt
+
+# You need to open .txt file and remove the '*' at the top before filtering the fasta file
+
+
+############### Assign Taxonomy ##############
+
+#!/bin/bash
+
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=10:00:00
+#SBATCH --mem=60GB
+#SBATCH --job-name=tax
+#SBATCH --output=slurm_tax_%j.out
+
+module purge
+module load blast/intel/2.2.22
+module load qiime/intel/1.9.1 
+
+# Change these paths according to where the project files are locally
+RUNDIR=/V9/Tax_assignments
+TAX=/Silva_111_curated_V2_2016/Euk_only_curated
+TAX99=/Silva_111_curated_V2_2016/99_clusters
+UPARSE=/V9/Uparse
+SEQS=/V9/Seqs
+
+cd $RUNDIR
+
+# Filter the rep set to only the OTUs with reads mapping to them
+	# Not all the OTUs end up with mapped reads, not sure why, but it happens, generally its only a few
+srun filter_fasta.py -f $UPARSE/V9_uniques_min2_otus_min2.fasta -o $SEQS/V9_rep_set.fasta -s $UPARSE/rep_seqs_to_keep.txt
+
+# Assign taxonomy in two steps, first with  curated Silva database from:
+	# An 18S rRNA Workflow for characterizing protists in sewage, with a focus on zoonotic Trichomonads
+	# Maritz, J.M., Rogers, K.H., Rock, T.M. et al. Microb Ecol (2017) 74: 923.
+	# Figshare [https://doi.org/10.6084/m9.figshare.3114850.v1].
+
+srun parallel_assign_taxonomy_blast.py -i $RUNDIR/V9_rep_set.fasta -m blast \
+	-r $TAX/Euk_Silva_111_curated.fasta \
+	-t $TAX/Euk_Silva_111_taxa_map_curated.txt \
+	-o $RUNDIR -e 1e-20 -O 4
+
+# Next use SILVA files clustered at 99% on anything that was not assigned
+	# this is because if you don't you end up with a huge portion in the No BLAST hit category
+	# they have a hit, they just aren't eukaryotes or are an uncultured protist
+	# second step required so these results can be filtered out and not artifically inflate the unassigned category
+
+# Get OTU ids with no blast hit
+grep "No blast hit" $RUNDIR/V9_rep_set_tax_assignments.txt | cut -f 1 > $RUNDIR/Unassigned_otu_ids.txt
+
+# Get OTU ids that were assigned taxonomy
+grep -v "No blast hit" $RUNDIR/V9_rep_set_tax_assignments.txt > $RUNDIR/Assigned_otus.txt
+
+# Filter the fasta file to get unassigned sequences
+srun filter_fasta.py -f $RUNDIR/V9_rep_set.fasta -s $RUNDIR/Unassigned_otu_ids.txt -o $RUNDIR/Unassigned_otus.fasta
+
+# Then with SILVA 111 clustered at 99%
+srun parallel_assign_taxonomy_blast.py -i $RUNDIR/Unassigned_otus.fasta -m blast \
+	-r $TAX99/99_Silva_111_rep_set.fasta \
+	-t $TAX99/99_Silva_111_taxa_map.txt \
+	-o $RUNDIR -e 1e-20 -O 4
+
+# Combine the taxonomy assignments
+cat $RUNDIR/Assigned_otus.txt $RUNDIR/Unassigned_otus_tax_assignments.txt > $RUNDIR/V9_otus_tax_assignments_edited.txt
+
+# Merge everything into a fasta file
+# Remove "OTU_" from the OTUs as its not compatible with QIIME
+cut -f 1 V9_otus_tax_assignments_edited.txt | perl -pe 's/;.*?;//g' | perl -pe 's/^OTU_//g' > V9_otus_tax_assignments_ids.txt
+
+cut -f 2-4 V9_otus_tax_assignments_edited.txt > V9_otus_tax_assignments_results.txt
+
+paste V9_otus_tax_assignments_ids.txt V9_otus_tax_assignments_results.txt > DEP_V9_otus_tax_assignments.txt
+
+
+############### Make and Filter the OTU table ##############
+
+#!/bin/bash
+
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=2
+#SBATCH --time=01:00:00
+#SBATCH --mem=10GB
+#SBATCH --job-name=otu_filter
+#SBATCH --output=slurm_otu_filter_%j.out
+
+module purge
+module load qiime/intel/1.9.1 
+
+# Change these paths according to where the project files are locally
+RUNDIR=/V9/OTUs
+UPARSE=/V9/Uparse
+TAX=/V9/Tax_assignments
+
+cd $RUNDIR
+
+# Make the OTU table
+srun make_otu_table.py -i $UPARSE/DEP_V9_otus.txt -t $TAX/V9_otus_tax_assignments.txt \
+	-m $RUNDIR/Sewage_study_mapping_file.txt \
+	-o $RUNDIR/V9_otu_table_w_tax.biom
+
+srun biom summarize-table -i $RUNDIR/V9_otu_table_w_tax.biom \
+	-o $RUNDIR/V9_otu_table_w_tax_seqs.txt
+
+# Filter out non 18S sequences and other multicellular eukaryotes
+	# The V9 primers are 3-domain primers so you will get Bacteria and Archaea in your data
+srun filter_taxa_from_otu_table.py -i $RUNDIR/V9_otu_table_w_tax.biom \
+	-o $RUNDIR/V9_otu_table_w_tax_Protist.biom \
+	-n Bacteria,Archaea,__Metazoa,__Streptophyta,__Glomeromycota,__Pezizomycotina,__Agaricomycetes,__Dacrymycetes,__Pucciniomycotina,__Ustilaginomycotina
+	
+srun biom summarize-table -i $RUNDIR/V9_otu_table_w_tax_Protist.biom \
+	-o $RUNDIR/V9_otu_table_w_tax_Protist_seqs.txt
+
+# Filter low abundance OTUs (< 0.001%)
+	# Conservative, (<0.005%) recommended for Illumina data
+srun filter_otus_from_otu_table.py -i $RUNDIR/V9_otu_table_w_tax_Protist.biom \
+	-o $RUNDIR/V9_otu_table_w_tax_Protist_af001.biom \
+	--min_count_fraction 0.00001
+
+srun biom summarize-table -i $RUNDIR/V9_otu_table_w_tax_Protist_af001.biom \
+	-o $RUNDIR/V9_otu_table_w_tax_Protist_af001_seqs.txt
+
+
+############### Generate OTU tables, etc. for individual analyses ##############
+
+## These commands can be run either in a script or on their own
+
+#### All fall sample analysis
+
+## Get an OTU table with only the fall samples
+filter_samples_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL.biom \
+	--sample_id_fp Fall2014_ids_sorted.txt
+
+filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_FALL.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered.biom -s 1
+
+sort_otu_table.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted.biom \
+	-l Fall2014_ids_sorted.txt
+
+biom summarize-table -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_seqs.txt
+
+## Rarefaction and alpha diversity
+	# Lowest was 98,669 sequences, rarefy to 90,000
+single_rarefaction.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_rarefaction90000.biom \
+	-d 90000
+
+alpha_diversity.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_rarefaction90000.biom \
+	-m shannon \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_rarefaction90000_alpha.txt
+
+# All further alpha and beta diversity analyses were done in R
+	# See the file 'Maritz_etal_Sewage_Fall_analysis_R_commands.txt' for these commands
+
+## Get input files for LEfSe analysis
+	# Need to remove the 'unassigned' OTUs in order to make hierarchical cladograms
+filter_taxa_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_nounassigned.biom -n "No blast hit"
+
+filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_nounassigned.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_nounassigned_filtered.biom -s 1
+
+summarize_taxa.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_nounassigned.biom \
+	-o . -L 13 --suppress_biom_table_output
+
+# The taxonomy file was formatted, run through the web version of LEfSe and visualized with GraPhlAn
+	# See the file XXX for these commands
+
+
+#### Fall Sewage only analysis
+
+## Get an OTU table with only the fall sewage samples
+filter_samples_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_SewageONLY.biom \
+	--sample_id_fp Sewage_Fall2014_ids_sorted.txt
+
+filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_SewageONLY.biom \
+	-o V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_SewageONLY_filtered.biom -s 1
+
+## Collapse the biological replicates and summarize taxonomy
+collapse_samples.py -b V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_SewageONLY_filtered.biom \
+	-m Collapsed_sample_mapp.txt --output_biom_fp V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_SewageONLY_filtered_collapsedSample.biom \
+	--output_mapping_fp Sewage_Fall_collapsed_sample_mapp.txt --collapse_mode sum --collapse_fields Sample
+
+summarize_taxa.py -i V9_otu_table_w_tax_Protist_af001_FALL_filtered_sorted_SewageONLY_filtered_collapsedSample.biom \
+	-o . -L 13 --suppress_biom_table_output
+
+
+#### DEP Year analysis
+
+## Get an OTU table with only the DEP year sewage samples
+filter_samples_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001.biom \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR.biom \
+	--sample_id_fp Year_sewage_ids_sorted.txt
+
+filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR.biom \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered.biom -s 1
+
+sort_otu_table.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered.biom \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted.biom -l Year_sewage_ids_sorted.txt
+
+## Rarefaction and alpha diversity
+	# Lowest was 98,669 sequences, rarefy to 90,000
+single_rarefaction.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted.biom \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_rarefaction90000.biom -d 90000
+
+alpha_diversity.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_rarefaction90000.biom \
+	-m shannon \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_rarefaction90000_alpha.txt
+
+# All further alpha and beta diversity analyses were done in R
+	# See the file 'Maritz_etal_Sewage_Year_analysis_R_commands.txt' for these commands
+
+
+## Collapse biological replicates and seasons and summarize taxonomy
+collapse_samples.py -b V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted.biom \
+	-m Year_collapsed_sample_mapp.txt \
+	--output_biom_fp V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_collapsedSample.biom \
+	--output_mapping_fp V9_Year_collapsed_sample_mapp.txt --collapse_mode sum --collapse_fields Sample
+
+summarize_taxa.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_collapsedSample.biom \
+	-o . -L 13 --suppress_biom_table_output
+
+collapse_samples.py -b V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted.biom \
+	-m Year_collapsed_sample_mapp.txt \
+	--output_biom_fp V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_collpasedDate.biom \
+	--output_mapping_fp V9_Year_collapsed_date_mapp.txt --collapse_mode sum --collapse_fields Collection_Date
+
+summarize_taxa.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_collpasedDate.biom \
+	-o . -L 13 --suppress_biom_table_output
+
+
+## Split OTU tables for network analysis
+split_otu_table.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted.biom \
+	-m Year_collapsed_sample_mapp.txt -f Collection_Date -o per_season_otu_tables
+
+## Filter to only OTUs present in 1/3 of samples = 11
+filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted__Collection_Date_Fall__.biom \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_Collection_Date_Fall_network_filtered.biom -s 11
+
+filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted__Collection_Date_Winter__.biom \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_Collection_Date_Winter_network_filtered.biom -s 11
+
+filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted__Collection_Date_Spring__.biom \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_Collection_Date_Spring_network_filtered.biom -s 11
+
+filter_otus_from_otu_table.py -i V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted__Collection_Date_Summer__.biom \
+	-o V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_Collection_Date_Summer_network_filtered.biom -s 11
+	
+# See the 'Maritz_etal_Sewage_network_analysis_commands.txt file for network analysis commands
+
+
+#### SourceTracker2 analysis
+
+
+
