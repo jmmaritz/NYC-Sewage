@@ -14,7 +14,7 @@ You will need to download the raw Illumina sequence data from the SRA under BioP
 You will also need to download the curated database used in this analysis.
 Information on this can be found in my Github repository [Curated-SILVA-Database][github_database] and the the complete database can be downloaded from [Figshare][Database]
 
-Alternatively, I have provided QIIME formatted OTU files from the original analysis for download.
+Alternatively, I have provided QIIME formatted [OTU files](/Data) from the original analysis for download.
 
 
 ### REQUIREMENTS:
