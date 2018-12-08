@@ -4,7 +4,7 @@ Protists in New York City Sewage
 
 ### DESCRIPTION
 
-This fileset contains commands and outputs used to carry out the 18S rRNA gene analysis and shotgun metagenomic analysis in the manuscript:
+This fileset contains QIIME and R commands and outputs used to carry out the 18S rRNA gene analysis and shotgun metagenomic analysis in the manuscript:
 
 Maritz, J. M., Ten Eyck, T. A., Alter, S. E., and Carlton, J. M. Patterns of diversity associated with raw sewage in New York City. That has been submitted to ISMEJ.
 
