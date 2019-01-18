@@ -205,7 +205,7 @@ tax_datasets = lapply(tax_datasets, function(x) cbind(OTUID=rownames(x), x))
 ### Put everything into one big list
 Keystone_taxa=mapply(cbind, Keystone, tax_datasets, SIMPLIFY = FALSE)
 
-************* Fix for posting
+## Create output files
 Test2=ldply(Keystone_taxa, data.frame)
 names(Test2) = c("Network","Degree","Closeness_centrality","OTUID","taxonomy1","taxonomy2","taxonomy3","taxonomy4","taxonomy5","taxonomy6","taxonomy7","taxonomy8","taxonomy9","taxonomy10","taxonomy11")
 Test2$Network = factor(Test2$Network, levels=c("V4.Fall","V4.Winter","V4.Spring","V4.Summer","V9.Fall","V9.Winter","V9.Spring","V9.summer"))
@@ -219,25 +219,6 @@ for(i in Networks){
   writeData(Keystone_analysis, i, Test2[Test2$Network==i,])
   saveWorkbook(Keystone_analysis, file = "DEP_Keystone_analysis.xlsx", overwrite = TRUE)
 }
-
-
-********* Needs a bit of work
-### Core
-year_files = c("V4_Year_protist_fungi_otu_table_af_001_filtered_sorted.biom","Sloan_project_all_seqs_otu_table_w_tax_noextra_protist_fungi_DEP_af_001_YEAR_filtered_sorted.biom")
-
-year_datasets = lapply(year_files, function(x){
-  dat=read_biom(x)
-  mydata=as.matrix(biom_data(dat))
-  mydata=t(mydata)
-  mytax=observation_metadata(dat)
-})
-names(year_datasets) = c("V4_year_otu_table", "V9_year_otu_table")
-
-year_binary = lapply(year_datasets, function(x) ifelse(x >= 1, 1, 0 ))
-core_datasets = lapply(year_binary, function(x) x[,colSums(x)>=130])
-
-write.table(colnames(core_datasets[[1]]), "V4_core_otus.txt", col.names=F, row.names= F, sep="\t", quote= F)
-write.table(colnames(core_datasets[[2]]), "V9_core_otus.txt", col.names=F, row.names= F, sep="\t", quote= F)
 
 
 #### Make the keystone plots
