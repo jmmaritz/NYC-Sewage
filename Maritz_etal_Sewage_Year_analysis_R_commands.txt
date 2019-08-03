@@ -23,7 +23,7 @@ library("extrafont")
 setwd("~/Desktop/Sewage_paper/Year_analysis")
 
 #### V4
-otufile = "V4_Year_protist_fungi_otu_table_af_001_filtered_sorted.biom"
+otufile = "V4_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted.biom"
 mapfile = "Year_mapp.txt"
 
 qiimedataV4 = import_biom(BIOMfilename=otufile)
@@ -33,7 +33,7 @@ Year_V4_DEP = merge_phyloseq(qiimedataV4, mapdata)
 
 
 #### V9
-otufile = "Sloan_project_all_seqs_otu_table_w_tax_noextra_protist_fungi_DEP_af_001_YEAR_filtered_sorted.biom"
+otufile = "V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted.biom"
 
 qiimedataV9 = import_biom(BIOMfilename=otufile)
 
@@ -63,10 +63,10 @@ Population = Variables$Population
 
 #### Import the Shannon diversity calculated in QIIME
 ### V4
-V4_Shannon = read.table("V4_Year_protist_fungi_otu_table_af_001_filtered_sorted_alpha_50000.txt")
+V4_Shannon = read.table("V4_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_alpha_50000.txt")
 
 ### V9
-V9_Shannon = read.table("Sloan_project_all_seqs_otu_table_w_tax_noextra_protist_fungi_DEP_af_001_YEAR_filtered_sorted_alpha_90000.txt")
+V9_Shannon = read.table("V9_otu_table_w_tax_Protist_af001_DEP_YEAR_filtered_sorted_alpha_90000.txt")
 
 #### Make dataframe of all data for both regions
 Year.alpha = data.frame(Season, Borough, Population, Area, Flow, Conductivity, Chloride, TSS, CBOD, Biomass, V9_Shannon, V4_Shannon, row.names = SampleID)
