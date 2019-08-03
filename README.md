@@ -11,7 +11,7 @@ Maritz, J. M., Ten Eyck, T. A., Alter, S. E., and Carlton, J. M. 2019. [Patterns
 
 ### DATA:
 
-You will need to download the raw Illumina sequence data from the SRA under BioProjects PRJEB28033[28033], [PRJEB26690][26690] and PRJEB23950[23950].
+You will need to download the raw Illumina sequence data from the SRA under BioProjects [PRJEB28033][28033], [PRJEB26690][26690] and [PRJEB23950][23950].
 
 You will also need to download the curated database used in this analysis.
 Information on this can be found in my Github repository [Curated-SILVA-Database][github_database] and the the complete database can be downloaded from [Figshare][Database]
